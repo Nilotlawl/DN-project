@@ -1,33 +1,18 @@
 import dpkt
 import socket
-import geoip2.database
-import ipaddress
+import pygeoip
 
-# Initialize the reader for the MaxMind GeoLite2 database
-reader = geoip2.database.Reader('GeoLite2-City.mmdb')
-
-# Check for private IP
-def is_private_ip(ip):
-    # Check if the IP address is private
-    return ipaddress.ip_address(ip).is_private
-
-# Generate KML for IP Pair
-def retKML(dstip):
-    srcip = 'x.x.x.x'
+gi = pygeoip.GeoIP('GeoLiteCity.dat')
+   
+   
+def retKML(dstip, srcip):
+    dst = gi.record_by_name(dstip)
+    src = gi.record_by_name('x.xxx.xxx.xxx')
     try:
-        # Skip private IP addresses
-        if is_private_ip(dstip):
-            return ''
-        
-        dst = reader.city(dstip)
-        src = reader.city(srcip)
-        
-        dstlongitude = dst.location.longitude
-        dstlatitude = dst.location.latitude
-        srclongitude = src.location.longitude
-        srclatitude = src.location.latitude
-        
-        # Format KML data
+        dstlongitude = dst['longitude']
+        dstlatitude = dst['latitude']
+        srclongitude = src['longitude']
+        srclatitude = src['latitude']
         kml = (
             '<Placemark>\n'
             '<name>%s</name>\n'
@@ -35,53 +20,42 @@ def retKML(dstip):
             '<tessellate>1</tessellate>\n'
             '<styleUrl>#transBluePoly</styleUrl>\n'
             '<LineString>\n'
-            '<coordinates>%6f,%6f %6f,%6f</coordinates>\n'
+            '<coordinates>%6f,%6f\n%6f,%6f</coordinates>\n'
             '</LineString>\n'
             '</Placemark>\n'
-        ) % (dstip, dstlongitude, dstlatitude, srclongitude, srclatitude)
-        
+        )%(dstip, dstlongitude, dstlatitude, srclongitude, srclatitude)
         return kml
-    except geoip2.errors.AddressNotFoundError:
-        print(f"Address not found in database: {dstip}")
+    except:
         return ''
-    except Exception as e:
-        print(f"Error processing IP {dstip}: {e}")
-        return ''
-
-# Process PCAP File and Generate KML
+    
 def plotIPs(pcap):
     kmlPts = ''
     for (ts, buf) in pcap:
         try:
             eth = dpkt.ethernet.Ethernet(buf)
-            if isinstance(eth.data, dpkt.ip.IP):
-                ip = eth.data
-                dst = socket.inet_ntoa(ip.dst)
-                KML = retKML(dst)
-                kmlPts += KML
-        except Exception as e:
-            print(f"Error processing packet: {e}")
-            continue
+            ip = eth.data
+            src = socket.inet_ntoa(ip.src)
+            dst = socket.inet_ntoa(ip.dst)
+            KML = retKML(dst, src)
+            kmlPts = kmlPts + KML
+        except:
+            pass
     return kmlPts
-
+    
 def main():
-    # Open the pcap file
-    with open('wire.pcap', 'rb') as f:
-        pcap = dpkt.pcap.Reader(f)
-        kmlheader = '<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document>\n' \
-                    '<Style id="transBluePoly">' \
+    f = open('wire.pcap', 'rb')
+    pcap = dpkt.pcap.Reader(f)
+    kmlheader = '<?xml version="1.0" encoding="UTF-8"?> \n<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document>\n'\
+                '<Style id="transBluePoly">' \
                     '<LineStyle>' \
-                    '<width>1.5</width>' \
-                    '<color>501400E6</color>' \
+                        '<width>1.5</width>' \
+                        '<color>501400E6</color>' \
                     '</LineStyle>' \
-                    '</Style>'
-        kmlfooter = '</Document>\n</kml>\n'
-        kmldoc = kmlheader + plotIPs(pcap) + kmlfooter
-        print(kmldoc)
-        
-        # Save the KML data to a file
-        with open('output.kml', 'w') as kmlfile:
-            kmlfile.write(kmldoc)
-
+                '</Style>'
+    kmlfooter = '</Document>\n</kml>\n'
+    kmldoc = kmlheader + plotIPs(pcap) + kmlfooter
+    with open('output.kml', 'w') as outfile:
+        outfile.write(kmldoc)
+    
 if __name__ == '__main__':
     main()
